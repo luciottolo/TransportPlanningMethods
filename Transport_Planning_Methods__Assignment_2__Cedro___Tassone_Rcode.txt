@@ -1,0 +1,803 @@
+Assignment 2: R code (Cedro & Tassone)
+
+# Set up ------------------------------------------------------------------
+
+require("lubridate") # great for dealing with dates if needed
+require("tidyverse") # basek of great packages: e.g. dplyr which makes data wrangling more readable and easier
+require("sf") # needed for plotting of spatial polygons and calculations with it
+require("AER") # package for vif test
+require("stargazer") # package to turn your regression results into Latex-coded table
+require("ggpubr")
+
+# 1 Import data -----------------------------------------------------------
+
+# use load and adjust the path to where you have saved the data file
+
+load("C:/Users/Lucio Tassone/Downloads/data_assignment.RData")
+
+# 1.1 Datasette dataotto ------------------------------------------------------
+
+## calculate main mode of trip
+trips_mainmode <- trips %>%
+  group_by(participant_id, trip_id) %>%
+  filter(length == max(length)) %>%
+  select(participant_id, leg_id) %>%
+  mutate(trip_mainmode = TRUE) %>%
+  ungroup()
+
+## Adding missing grouping variables: `trip_id`
+## left_join new data
+trips <- trips %>%
+  left_join(trips_mainmode, by = c("participant_id","trip_id","leg_id")) %>%
+  # changing the order of variables
+  relocate(trip_mainmode, .after = mode_agg)
+  rm(trips_mainmode)
+  
+## only look at main mode legs of the trips
+trips_mm <- trips %>%
+  filter(trip_mainmode == TRUE)
+
+#join trip per week per participant
+
+participants <- participants %>%
+  filter (income != "99")
+
+x <- participants %>% 
+  left_join(trips_mm %>%
+              group_by(participant_id) %>% 
+              summarise(trips_w = n_distinct(trip_id)),
+            by = "participant_id")
+
+# 1.2 Start analysing the Output Variable ------------------------------------------------------
+
+e <- ggplot(x, aes(, y=trips_w)) + 
+  geom_boxplot(fill="slateblue", alpha=0.2) + 
+  ylab("Trips per week per participant") +
+  ggtitle("Trips per week per participant") +
+  theme(axis.ticks.x = element_blank(),
+        axis.text.x = element_blank()) +
+  labs(
+    subtitle="boxplot that shows variation of trips per week per participant",
+    caption="From MOBIS data set. https://ivtmobis.ethz.ch/mobis/en/ ")
+e
+## in case boxplot is too big: par(mar=c(4,4,4,4))
+
+a <- ggplot(x, aes(income, trips_w, colour = household_size)) + 
+  geom_point() +
+  theme(plot.title = element_text(hjust = 0.5))+
+  labs(colour="Household size")+
+  labs(x = "Income Class", y = "Number of Trips")
+
+c <-x %>% 
+  ggplot( aes( gen_accessibility,trips_w, colour= household_size)) + 
+  geom_point() +
+  theme(plot.title = element_text(hjust = 0.5))+
+  labs(colour="Household size")+
+  labs(x = "General accessibility", y = "Number of Trips")
+
+
+figa <- ggarrange(a, e, c,
+                  labels = c("A", "B", "C"),
+                  ncol = 2 ,
+                  nrow = 2)
+figa
+
+#how many outliers!! (neither so many but we clean)
+boxplot(x$trips_w, plot=FALSE)$out
+outliers <- boxplot(x$trips_w, plot=FALSE)$out
+y<-x
+y<- y[-which(x$trips_w %in% outliers),]
+boxplot(y$trips_w)
+
+#same but without outliers
+
+ee <- ggplot(y, aes(, y=trips_w)) + 
+  geom_boxplot(fill="slateblue", alpha=0.2) + 
+  ylab("Trips per week per participant") +
+  ggtitle("Trips per week per participant without outliers") +
+  theme(axis.ticks.x = element_blank(),
+        axis.text.x = element_blank()) +
+  labs(
+    subtitle="boxplot that shows variation of trips per week per participant without outliers",
+    caption="From MOBIS data set. https://ivtmobis.ethz.ch/mobis/en/ ")
+ee
+
+aa <-  ggplot(y, aes(income, trips_w, colour = household_size)) + 
+  geom_point() + 
+  theme(plot.title = element_text(hjust = 0.5))+
+  labs(colour="Household size")+
+  labs(x = "Income Class", y = "Number of Trips")
+
+cc <- y %>% 
+  ggplot( aes( gen_accessibility,trips_w, colour= household_size)) + 
+  geom_point() +
+  theme(plot.title = element_text(hjust = 0.5))+
+  labs(colour="Household size")+
+  labs(x = "General accessibility", y = "Number of Trips")
+
+figb <- ggarrange(aa, ee, cc,
+                  labels = c("A", "B", "C"),
+                  ncol = 2 ,
+                  nrow = 2)
+figb
+
+#here i compare w/wo outliers
+figc <- ggarrange(a, aa, c, cc,
+                  ncol = 2 ,
+                  nrow = 2)
+annotate_figure(figc,
+                top = text_grob("Comparison with and without outliers", size=14),
+                bottom = text_grob("From MOBIS data set. https://ivtmobis.ethz.ch/mobis/en/ "))
+
+figc
+
+figd <- ggarrange(e, ee,
+                  ncol = 2 ,
+                  nrow = 1)
+annotate_figure(figd,
+                top = text_grob("Comparison with and without outliers", size=14))
+
+# 1.3 Use pairs() to make a scatterplot matrix ------------------------------------------------------
+
+pairs(trips_w ~ income , data = y)
+
+pairs(trips_w ~ gen_accessibility , data = y)
+
+panel.cor <- function(x, y, cex.cor = 0.8, method = "pearson", ...) {
+  options(warn = -1)                   # Turn of warnings (e.g. tied ranks)
+  usr <- par("usr"); on.exit(par(usr)) # Saves current "usr" and resets on exit
+  par(usr = c(0, 1, 0, 1))             # Set plot size to 1 x 1
+  r <- cor(x, y, method = method, use = "pair")               # correlation coef
+  p <- cor.test(x, y, method = method)$p.val                  # p-value                              
+  txt <- format(r, digits = 3)                                # Format r-value
+  txt1 <- format(p, digits = 3)                                 # Format p-value
+  txt2 <- paste0("r= ", txt, '\n', "p= ", txt1, '\n')           # Make panel text
+  text(0.5, 0.5, txt2, cex = cex.cor, ...)                      # Place panel text
+  options(warn = 0)                                             # Reset warning
+}
+
+# Customize upper panel
+upper.panel<-function(x, y){
+  points(x,y, pch = 19)
+}
+
+pairs(trips_w ~ income + gen_accessibility + age + household_size , data = y,
+      labels = c("Income class","General accessibility","Age","Household size","Number of trips"),
+      main = "Relationship between variables I",
+      gap = 1/10,
+      lower.panel = upper.panel,
+      upper.panel = panel.cor)
+
+pairs(trips_w ~ as.factor(sex)+ has_pt_pass_ga + has_pt_pass_halffare + has_pt_pass_regional, data = y,
+      labels = c("Sex","Posession GA","Posession 1/2 price","Posession regional pass","Number of trips"),
+      main = "Relationship between variables II",
+      gap = 1/10,
+      lower.panel = upper.panel,
+      upper.panel = panel.cor)
+
+pairs(trips_w ~ as.factor(has_pushbike) + as.factor(has_ebike) + as.factor(has_fast_ebike) + as.factor(own_car), data = y,
+      labels = c("Ownership pushbike","Ownership e-bike","Ownership fast e-bike","Ownership car","Number of trips"),
+      main = "Relationship between variables III",
+      gap = 1/10,
+      lower.panel = upper.panel,
+      upper.panel = panel.cor)
+
+pairs(trips_w ~ as.factor(own_motorbike) + as.factor(own_bike_ebike) + as.factor(freq_driver_own_car) + as.factor(freq_driver_car_sharing), data = y,
+      labels = c("Ownership motorbike","Ownership e-bike and bike","Frequent own car driver","Frequent car sharing driver","Number of trips"),
+      main = "Relationship between variables IV",
+      gap = 1/10,
+      lower.panel = upper.panel,
+      upper.panel = panel.cor)
+
+pairs(trips_w ~ as.factor(freq_pt_local_pt) + as.factor(freq_pt_train) + as.factor(freq_bike_ebike) + as.factor(freq_bike_bike_sharing), data = y,
+      labels = c("Frequent use of local PT","Frequent train user","Frequent bike/e-bike user","Frequent bike/bike sharing user","Number of trips"),
+      main = "Relationship between variables V",
+      gap = 1/10,
+      lower.panel = upper.panel,
+      upper.panel = panel.cor)
+
+pairs(trips_w ~ as.factor(freq_bike_bike) + as.factor(freq_passenger_taxi) + as.factor(freq_passenger_ridehailing) + as.factor(freq_passenger_car_pooling), data = y,
+      labels = c("Frequent bike user","Frequent taxi user","Frequent ridehailing passenger","Frequent car pooling passenger","Number of trips"),
+      main = "Relationship between variables VI",
+      gap = 1/10,
+      lower.panel = upper.panel,
+      upper.panel = panel.cor)
+
+pairs(trips_w ~ as.factor(freq_passenger_car_household) + as.factor(car_fuel) + as.factor(car_year) + as.factor(car_size), data = y,
+      labels = c("Frequent car household passenger","Type of car fuel","Year of car","Car size","Number of trips"),
+      main = "Relationship between variables VII",
+      gap = 1/10,
+      lower.panel = upper.panel,
+      upper.panel = panel.cor)
+
+pairs(trips_w ~ as.factor(work_type) + as.factor(employment_1) + as.factor(employment_2) + as.factor(education), data = y,
+      labels = c("Work type","Type of first employment","Type of second employment","Education","Number of trips"),
+      main = "Relationship between variables VIII",
+      gap = 1/10,
+      lower.panel = upper.panel,
+      upper.panel = panel.cor)
+
+#run this on a big screen, it's the final model
+pairs(trips_w ~ as.factor(income) + gen_accessibility + I(age^2) + household_size + as.factor(education) + as.factor(sex) + as.factor(has_pt_pass_ga) + as.factor(has_pt_pass_halffare) + as.factor(has_pt_pass_regional) + as.factor(own_car)+ as.factor(own_motorbike) + as.factor(own_bike_ebike)  + miv_accessibility + oev_accessibility  + as.factor(employment_1),
+       data = y,
+      main = "Relationship between variables of the final model",
+      gap = 1/10,
+      lower.panel = upper.panel,
+      upper.panel = panel.cor)
+
+pairs(trips_w ~ as.factor(income) + gen_accessibility,      data = y,
+      main = "Relationship between input and output variables",
+      gap = 1/10,
+      lower.panel = upper.panel,
+      upper.panel = panel.cor)
+## Best relationships:
+# Number of trips vs education R=-0.302
+# Number of trips vs car year R=0.207
+# Number of trips vs car size R=0.143
+# Number of trips vs sex R=0.142
+
+# 1.4 Regression: fit <- lm(y ~ x1 + x2, data),------------------------------------------------------
+
+#x = income
+fit1 <- lm(trips_w ~ as.factor(income) ,
+           data = y)
+summary(fit1)
+par(mfrow = c(2, 2)) 
+plot(fit1, which = c(1, 2, 3)) 
+
+#x= income + gen_accessibility
+fit2 <- lm(trips_w ~ as.factor(income) + gen_accessibility  , 
+           data = x)
+summary(fit2)
+par(mfrow = c(2, 2)) 
+plot(fit2, which = c(1, 2, 3))
+
+#x= income + gen_accessibility + age
+fit3 <- lm(trips_w ~ as.factor(income) + gen_accessibility + age , data = y)
+summary(fit3)
+par(mfrow = c(2, 2)) 
+plot(fit3, which = c(1, 2, 3))
+
+#x= income + gen_accessibility + age^2
+fit3a <- lm(trips_w ~ income + gen_accessibility + I(age^2) , data = y)
+summary(fit3a)
+par(mfrow = c(2, 2)) 
+plot(fit3a, which = c(1, 2, 3))
+#even if just a slightly positive change happen, it has been decided to square the age variable.
+
+#here we add hh_size to the regression
+fit4 <- lm(trips_w ~ as.factor(income) + gen_accessibility + I(age^2) + household_size, data=y)
+summary(fit4) #here p-value doubles, income no good indicator apparently
+par(mfrow = c(2, 2)) 
+plot(fit4, which = c(1, 2, 3))
+
+#education dummies are added in the regression
+fit5 <- lm(trips_w ~ as.factor(income) + gen_accessibility + I(age^2) + household_size + as.factor(education), data=y)
+summary(fit5)
+par(mfrow = c(2, 2)) 
+plot(fit5, which = c(1, 2, 3))
+
+#sex dummies are added
+fit6 <- lm(trips_w ~ as.factor(income) + gen_accessibility + I(age^2) + household_size + as.factor(education) + as.factor(sex), data=y)
+summary(fit6)
+par(mfrow = c(2, 2)) 
+plot(fit6, which = c(1, 2, 3))
+
+#possession of GA, Halffare and Regional pass have been included here
+fit7 <- lm(trips_w ~ as.factor(income) + gen_accessibility + I(age^2) + household_size + as.factor(education) + as.factor(sex) + as.factor(has_pt_pass_ga) + as.factor(has_pt_pass_halffare) + as.factor(has_pt_pass_regional), data = y)
+summary(fit7)
+par(mfrow = c(2, 2)) 
+plot(fit7, which = c(1, 2, 3))
+
+#car, motorbike and bike ownership or usage variable have been included in the regression
+fit8 <- lm(trips_w ~ as.factor(income) + gen_accessibility + I(age^2) + household_size + as.factor(education) + as.factor(sex) + as.factor(has_pt_pass_ga) + as.factor(has_pt_pass_halffare) + as.factor(has_pt_pass_regional) + as.factor(own_car) + as.factor(own_motorbike) + as.factor(own_bike_ebike),
+           data=y)
+summary(fit8)
+par(mfrow = c(2, 2)) 
+plot(fit8, which = c(1, 2, 3))
+
+#individual and public transpor accessibilities have been included in the regression
+fit9 <- lm(trips_w ~ as.factor(income) + gen_accessibility + I(age^2) + household_size + as.factor(education) + as.factor(sex) + as.factor(has_pt_pass_ga) + as.factor(has_pt_pass_halffare) + as.factor(has_pt_pass_regional) + as.factor(own_car) + as.factor(own_motorbike) + as.factor(own_bike_ebike)  + miv_accessibility + oev_accessibility, data=y)
+summary(fit9)
+par(mfrow = c(2, 2)) 
+plot(fit9, which = c(1, 2, 3))
+
+#car size and primal employment has been included
+fit10 <- lm(trips_w ~ as.factor(income) + gen_accessibility + I(age^2) + household_size + as.factor(education) + as.factor(sex) + as.factor(has_pt_pass_ga) + as.factor(has_pt_pass_halffare) + as.factor(has_pt_pass_regional) + as.factor(own_car)+ as.factor(own_motorbike) + as.factor(own_bike_ebike)  + miv_accessibility + oev_accessibility  + as.factor(employment_1),
+            data=y)
+summary(fit10)
+par(mfrow = c(2, 2)) 
+plot(fit10, which = c(1, 2, 3))
+
+#Home location by postcode control variable has been included, to reduce location fixed effects. 
+fit11 <- lm(trips_w ~ as.factor(income) + gen_accessibility + I(age^2) + household_size + as.factor(education) + as.factor(sex) + as.factor(has_pt_pass_ga) + as.factor(has_pt_pass_halffare) + as.factor(has_pt_pass_regional) + as.factor(own_car) + as.factor(own_motorbike) + as.factor(own_bike_ebike)  + miv_accessibility + oev_accessibility + as.factor(employment_1)+ as.factor(postcode_home), data=y)
+summary(fit11)
+par(mfrow = c(2, 2)) 
+plot(fit11, which = c(1, 2, 3))
+
+
+#Here multicollinearity test has been runned. variables that presented multicollinearity have been adjusted, creating product predictor of the predictors.
+fit12 <- lm(trips_w ~ as.factor(income) + gen_accessibility + I(age^2) + as.factor(household_size) + as.factor(education) + as.factor(sex) + as.factor(has_pt_pass_ga) + as.factor(has_pt_pass_halffare) + as.factor(has_pt_pass_regional) + as.factor(own_car) + as.factor(own_motorbike) + as.factor(own_bike_ebike)  + miv_accessibility + oev_accessibility + as.factor(employment_1)+ gen_accessibility*miv_accessibility + gen_accessibility*oev_accessibility + as.factor(postcode_home), data=y)
+summary(fit12)
+par(mfrow = c(2, 2)) 
+plot(fit12, which = c(1, 2, 3))
+
+#x cat variables
+anova(fit12)
+
+fit13 <- lm(trips_w ~ as.factor(income) + gen_accessibility + as.factor(household_size) + as.factor(education) + as.factor(has_pt_pass_regional) + miv_accessibility + oev_accessibility + as.factor(employment_1)+ gen_accessibility*miv_accessibility + gen_accessibility*oev_accessibility + as.factor(postcode_home), data=y)
+summary(fit13)
+par(mfrow = c(2, 2)) 
+plot(fit12, which = c(1, 2, 3))
+
+#mod
+
+## Regression output: summary(fit) incorporated
+
+##Visual assumption checks: plot(fit) gives 4 plots, plot(fit, which = c(1,2)) only gives Tukey Anscombe plot and QQ plot of residuals
+
+#plot 1.	Residuals vs Fitted. 
+#Used to check the linear relationship assumptions. 
+#A horizontal line, without distinct patterns is an indication for a linear relationship, 
+
+#plot 2.	Normal Q-Q. 
+#Used to examine whether the residuals are normally distributed. 
+#It's good if residuals points follow the straight dashed line.
+
+# plot 3.	Scale-Location (or Spread-Location). 
+#Used to check the homogeneity of variance of the residuals (homoscedasticity). 
+#Horizontal line with equally spread points is a good indication of homoscedasticity. 
+
+# 1.5 Multicolinearity: Package AER: vif()------------------------------------------------------
+
+z <- y %>% 
+  select(44,4,41,6,3,5,7,9,15,16,17,21,22,23,42,43)
+pearson  <-  round(cor(z,  use  =  "pairwise.complete.obs",   
+                       method  =  "pearson"),  2) 
+pearson 
+
+#beautiful tables with Kableextrax
+library(kableExtra)
+
+pearson.table <- as.data.frame(pearson)
+
+pearson.table %>%
+  kbl(caption = "Correlation Matrix") %>%
+  # kable_classic(full_width = F, html_font = "Cambria") %>%
+  #kable_paper("striped", full_width = F) %>%
+  kable_material(c("striped", "hover"))
+
+#As a rule of thumb, a VIF value that exceeds 5 or 10 indicates a problematic amount of collinearity (James et al. 2014).
+#this is for multicollinearity
+#runned on model 10, wout location FE.
+vif(fit10)
+
+
+# 1.6 Models Tests------------------------------------------------------
+## HOMO VS. HETEROSCEDASTICITY 
+#e.g. BREUSCH PAGAN, WHITE OR GOLDFELD QUANDT TEST
+# https://www.statology.org/breusch-pagan-test-r/
+bptest(fit11)
+
+## MISSSPECIFICATION RAMSEY's RESET TEST  
+resettest(fit8) 
+
+##AUTOCORRELATION DURBAN-WATSON 
+dwtest(fit11) 
+
+# 1.7 Stargazers------------------------------------------------------
+
+stargazer(fit1, fit2, fit3, fit3a, 
+          type = "latex",
+          #type = "text",
+          single.row = FALSE,
+          digits = 2,
+          #          se = rob_se,
+          header = FALSE,
+          font.size = "scriptsize",
+          column.sep.width = "0.025pt",
+          # omit = c("f", "adj.rsq"),
+          df = FALSE, 
+          no.space = TRUE) 
+
+rob_se <- list(sqrt(diag(vcovHC(fit1, type = "HC1"))),
+               sqrt(diag(vcovHC(fit2, type = "HC1"))),
+               sqrt(diag(vcovHC(fit3, type = "HC1"))),
+               sqrt(diag(vcovHC(fit4, type = "HC1"))),
+               sqrt(diag(vcovHC(fit5, type = "HC1"))),
+               sqrt(diag(vcovHC(fit6, type = "HC1"))),
+               sqrt(diag(vcovHC(fit7, type = "HC1"))),
+               sqrt(diag(vcovHC(fit8, type = "HC1"))),
+               sqrt(diag(vcovHC(fit9, type = "HC1"))),
+               sqrt(diag(vcovHC(fit10, type = "HC1"))),
+               sqrt(diag(vcovHC(fit11, type = "HC1"))),
+               sqrt(diag(vcovHC(fit12, type = "HC1"))),
+               sqrt(diag(vcovHC(fit13, type = "HC1"))))
+
+stargazer(fit1, fit2, fit3, fit4, fit5, fit6, fit7, fit8, fit9, fit10, fit11, fit12,fit13 , 
+                   type = "latex",
+         # type = "text",
+          single.row = FALSE,
+          digits = 4,
+          se = rob_se,
+          header = FALSE,
+          font.size = "tiny",
+          column.sep.width = "0.025pt",
+          omit = c("postcode_home"),
+          df = FALSE,
+          no.space = TRUE) 
+
+stargazer(fit11,fit12,fit13,  
+          type = "latex",
+           #type = "text",
+          single.row = FALSE,
+          digits = 4,
+          se = rob_se,
+          header = FALSE,
+          font.size = "tiny",
+          column.sep.width = "0.025pt",
+          omit = c("postcode_home"),
+          df = FALSE,
+          no.space = TRUE)
+
+# 3 Trip distribution -----------------------------------------------------
+
+# Construct heatmap to show trip distribution between zones from the data 
+
+trips_zones <- trips %>%
+  select(start_bznr,start_bzname,end_bznr,end_bzname) %>%
+  group_by(start_bzname,end_bzname) %>%
+  count(start_bzname,end_bzname)
+
+# Table origin (rows) to destination (columns)
+table(trips$start_bzname,trips$end_bzname)
+
+# Heatmap
+ggplot(trips_zones, aes(end_bzname, start_bzname, fill= n)) + 
+      geom_tile() +
+      scale_fill_gradient(low="white", high="red") +
+      ggtitle("Heatmap origin-destination matrix") +   
+      theme(plot.title = element_text(hjust = 0.5))+
+      labs(fill="Number of trips")+
+      labs(x = "Destination", y = "Origin",
+          title ="Origin-destination matrix",
+          subtitle = "heatmap that shows frequency of travel between two zones",
+          caption = "From MOBIS data set. https://ivtmobis.ethz.ch/mobis/en/ ") +
+      theme(
+          legend.position = c(.95, 0.55),
+          legend.justification = c("right", "top"),
+          legend.box.just = "right",
+          legend.margin = margin(6, 6, 6, 6)
+      )
+
+# Compute number of produced and attracted trips for each zone
+
+trips_zones <- trips_zones %>%
+  select (start_bzname,end_bzname,n) %>%
+  group_by(start_bzname) %>%
+  mutate(trips_prod=sum(n)) %>%
+  ungroup() %>%
+  group_by(end_bzname) %>%
+  mutate(trips_attr=sum(n)) %>%
+  filter (start_bzname == end_bzname)%>%
+  ungroup()
+
+# Compute mean travel time for each pair of zones
+
+mean_tt <- trips %>%
+  select (duration, start_bzname, end_bzname) %>%
+  group_by(start_bzname,end_bzname) %>%
+  mutate(mean_duration=mean(duration/60),mean_duration=floor(mean_duration), duration = NULL) %>%
+  distinct() %>%
+  ungroup()
+
+# Start building matrix for Furness method with impedance function
+
+trip_dis <- mean_tt %>%
+  select (start_bzname,end_bzname,mean_duration) %>%
+  mutate (fc = 1/(mean_duration)^2)
+
+# Set the total number of produced trips per zone as the production and the total
+# number of attracted trips as the attraction
+
+trip_prod <- trips_zones %>%
+  select (end_bzname,trips_prod,trips_attr) 
+
+# Add all the variables needed for Furness method to the matrix
+
+trip_dis <- trip_dis %>%
+  left_join (trips_zones %>% select (start_bzname,trips_prod), by = c("start_bzname")) %>%
+  left_join (trips_zones %>% select (end_bzname,trips_attr), by = c("end_bzname")) %>%
+  mutate (production_i=0,attraction_i=0,alphas=0,betas=1,previous_betas=0,error=0,alphas_calc=0,betas_calc=0) 
+
+sum_error <- 1
+
+# Loop that executes Furness method and stops when the error is smaller than 0.0001%
+
+while (sum_error>0.000001) {
+  trip_dis$previous_betas <- trip_dis$betas
+  trip_dis <- trip_dis %>%
+    group_by(end_bzname) %>%
+    mutate (alphas_calc = betas*trips_attr*fc) %>%
+    ungroup() %>%
+    group_by(start_bzname) %>%
+    mutate (alphas=1/sum(alphas_calc)) %>%
+    ungroup() %>%
+    mutate (mean_duration = floor(alphas*trips_prod*betas*trips_attr*fc)) %>%
+    group_by(start_bzname) %>%
+    mutate (production_i=sum(mean_duration)) %>%
+    ungroup() %>%
+    group_by(end_bzname) %>%
+    mutate (attraction_i=sum(mean_duration)) %>%
+    ungroup() %>%
+    group_by(start_bzname) %>%
+    mutate (betas_calc=alphas*trips_prod*fc) %>%
+    ungroup() %>%
+    group_by(end_bzname) %>%
+    mutate(betas=1/sum(alphas*trips_prod*fc),
+           error=(abs(betas-previous_betas))/betas)
+  sum_error <- sum(trip_dis$error)
+    }
+
+trip_dis
+
+
+# Heatmap of the matrix resulted from model
+ggplot(trip_dis, aes(end_bzname, start_bzname, fill= mean_duration)) + 
+      geom_tile() +
+      scale_fill_gradient(low="white", high="red") +
+      ggtitle("Heatmap origin-destination matrix") +   
+      theme(plot.title = element_text(hjust = 0.5))+
+      labs(fill="Number of trips")+
+      labs(x = "Destination", y = "Origin",
+          title ="Origin-destination matrix from model",
+          subtitle = "heatmap that shows model results of trip distribution",
+          caption = "From MOBIS data set. https://ivtmobis.ethz.ch/mobis/en/ ") +
+      theme(
+          legend.position = c(.95, 0.55),
+          legend.justification = c("right", "top"),
+          legend.box.just = "right",
+          legend.margin = margin(6, 6, 6, 6)
+      )
+
+
+# 4 Mode choice -----------------------------------------------------
+
+## Will be discussed in Lab session 2 on November 3rd, 2021.
+
+
+
+# ################################################################# #
+#### LOAD LIBRARY AND DEFINE CORE SETTINGS                       ####
+# ################################################################# #
+
+### Thank you to Prof. Hess from Leeds!
+
+### Clear memory
+#rm(list = ls())
+
+### Load libraries
+# install.packages("apollo")
+getwd()
+setwd("C:/Scuola/Master/HS21/Transport Planning Methods/Exercise 2")
+library(apollo)
+library(tidyverse)
+
+### Initialise code
+apollo_initialise()
+
+### Set core controls
+apollo_control = list(
+  modelName       ="MNL Mobis",
+  modelDescr      ="MNL model on mode choice for the Mobis dataset",
+  indivID         ="participant_id"
+)
+
+# ################################################################# #
+#### LOAD DATA AND APPLY ANY TRANSFORMATIONS                     ####
+# ################################################################# #
+
+# database = (here::here("C:/Scuola/Master/HS21/Transport Planning Methods/Exercise 2","data_assignment_modechoice"))
+load("C:/Scuola/Master/HS21/Transport Planning Methods/Exercise 2/data_assignment_modechoice.RData")
+
+# Remove all NA observation
+database <- modechoicetrips %>%
+            filter_at(vars(tt_walk, tt_car,cost_car,tt_pt,accegr_t_pt,freq_pt,trans_t_pt,trans_nr_pt,cost_pt),all_vars(!is.na(.))) 
+            
+          
+
+# ################################################################# #
+#### DEFINE MODEL PARAMETERS                                     ####
+# ################################################################# #
+
+### Vector of parameters, including any that are kept fixed in estimation
+
+# here only alternative specific constants and generic parameters!
+
+apollo_beta=c(asc_car       = 0,
+              asc_w         = 0,
+              asc_bike      = 0,
+              asc_pt        = 0,
+              b_tt_w        = 0,
+              b_tt_bike     = 0,
+              b_tt_car      = 0,
+              b_tt_pt       = 0,
+              b_dist_pt     = 0,
+              b_accegr_t_pt = 0,
+              b_freq_pt     = 0,
+              b_trans_t_pt  = 0,
+              b_trans_nr_pt = 0,
+              b_cost_pt     = 0,
+              b_cost        = 0)
+
+### Car-specific constant and beta tt for walking to be kept fixed at their starting value in apollo_beta, use apollo_beta_fixed = c() if none
+apollo_fixed = c("asc_car","b_tt_w")
+
+# ################################################################# #
+#### GROUP AND VALIDATE INPUTS                                   ####
+# ################################################################# #
+
+# runs a number of checks and produces a consolidated list of model inputs (see manual for further information)
+
+apollo_inputs = apollo_validateInputs()
+
+# ################################################################# #
+#### DEFINE MODEL AND LIKELIHOOD FUNCTION                        ####
+# ################################################################# #
+
+# core part of code! defined by modeller! function is used for estimation
+# function returns probabilities, depends on functionality, three inputs: betas, inputs and functionality
+
+apollo_probabilities=function(apollo_beta, apollo_inputs, functionality="estimate"){
+  
+  ### Attach inputs and detach after function exit
+  apollo_attach(apollo_beta, apollo_inputs)
+  on.exit(apollo_detach(apollo_beta, apollo_inputs))
+  
+  ### Create empty list of probabilities P
+  P = list()
+  
+  ### List of utilities: these must use the same names as in mnl_settings, order is irrelevant
+  V = list()
+  V[['walk']] = asc_w    + b_tt_w    * tt_walk                         
+  V[['bike']] = asc_bike + b_tt_bike * tt_bike                        
+  V[['car']]  = asc_car  + b_tt_car  * tt_car  + b_cost    * cost_car                        
+  V[['PT']]   = asc_pt   + b_tt_pt   * tt_pt   + b_cost_pt * cost_pt     + b_dist_pt * distance_pt + 
+               b_accegr_t_pt * accegr_t_pt + b_freq_pt * freq_pt + b_trans_t_pt * trans_t_pt + b_trans_nr_pt * trans_nr_pt
+
+  
+  ### Define settings for MNL model component
+  mnl_settings = list(
+    alternatives  = c(car=1, PT=2, bike=3, walk=4), 
+    avail         = list(car=avail_car, PT=avail_pt, bike=avail_bike, walk=avail_walk), 
+    choiceVar     = choice, # name in database
+    V             = V
+  )
+  
+  ### Compute probabilities using MNL model
+  P[['model']] = apollo_mnl(mnl_settings, functionality)
+  
+  ### Take product across observation for same individual
+  # only to be used in the presence of multiple observations per individual (see presentation)
+  P = apollo_panelProd(P, apollo_inputs, functionality)
+  
+  ### Prepare and return outputs of function
+  P = apollo_prepareProb(P, apollo_inputs, functionality)
+  return(P)
+}
+
+
+# ################################################################# #
+#### MODEL ESTIMATION                                            ####
+# ################################################################# #
+
+# actual estimation using log-likelihood approach
+# outcomes of model estimation are saved in a list called model
+# most important output in list are the estimates of beta
+model = apollo_estimate(apollo_beta, apollo_fixed, apollo_probabilities, apollo_inputs)
+
+# ################################################################# #
+#### MODEL OUTPUTS                                               ####
+# ################################################################# #
+
+# ----------------------------------------------------------------- #
+#---- FORMATTED OUTPUT (TO SCREEN)                               ----
+# ----------------------------------------------------------------- #
+
+apollo_modelOutput(model)
+
+# ----------------------------------------------------------------- #
+#---- FORMATTED OUTPUT (TO FILE, using model name)               ----
+# ----------------------------------------------------------------- #
+
+#apollo_saveOutput(model)
+
+# ################################################################# #
+##### ADDITIONAL RESULTS ANALYSIS AND DIAGNOSTICS                ####
+# ################################################################# #
+
+### Print the outputs of additional diagnostics to file (comment out sink to file command below if not desired)
+### Remember to run the line closing any open sinks at the end of this file
+#sink(paste(model$apollo_control$modelName,"_additional_output.txt",sep=""),split=TRUE)
+
+# ----------------------------------------------------------------- #
+#---- STANDARD ERRORS OF PARAMETER TRANSFORMATIONS               ----
+# ----------------------------------------------------------------- #
+
+### Value of Travel time in minutes for car
+apollo_deltaMethod(model, deltaMethod_settings = list(operation="ratio",
+                                                     parName1="b_tt_car",
+                                                     parName2="b_cost"))  # =-0.07021
+
+
+### Value of Travel time in minutes for biking
+apollo_deltaMethod(model, deltaMethod_settings = list(operation="ratio",
+                                                     parName1="b_tt_bike",
+                                                     parName2="b_cost"))  # =0.0193
+
+### Value of Travel time in minutes for PT
+apollo_deltaMethod(model, deltaMethod_settings = list(operation="ratio",
+                                                     parName1="b_tt_pt",
+                                                     parName2="b_cost")) # =-0.01092
+
+### Value of Travel time in minutes for PT
+apollo_deltaMethod(model, deltaMethod_settings = list(operation="ratio",
+                                                     parName1="b_tt_pt",
+                                                     parName2="b_cost_pt"))  # =0.2536
+
+### Value of Travel time in minutes for PT
+apollo_deltaMethod(model, deltaMethod_settings = list(operation="ratio",
+                                                     parName1="b_tt_car",
+                                                     parName2="b_cost_pt"))  # =1.63
+
+
+### Value of Travel time in minutes for PT
+apollo_deltaMethod(model, deltaMethod_settings = list(operation="ratio",
+                                                     parName1="b_tt_bike",
+                                                     parName2="b_cost_pt")) # =-0.4483
+
+# ################################################################# #
+##### POST-ANALYSIS                                         ####
+# ################################################################# #
+
+### Use the estimated model to make predictions
+predictions_base = apollo_prediction(model, 
+                                     apollo_probabilities, 
+                                     apollo_inputs,
+                                     prediction_settings=list())
+predictions_base
+
+### Look at a summary of the predicted choice probabilities
+summary(predictions_base)
+
+## Compute average probability for each mode for each pair of zones
+
+colnames(predictions_base)[1] <- "participant_id"
+modal_split <- predictions_base 
+modal_split <- modal_split %>%
+               mutate (start_bzname = database$start_bzname,
+                       end_bzname = database$end_bzname) %>%
+               group_by (start_bzname,end_bzname) %>%
+               mutate (av_prob_car = mean(car),
+                       av_prob_PT = mean(PT),
+                       av_prob_bike = mean (bike),
+                       av_prob_walk = mean(walk)) %>%
+               left_join(trip_dis %>% select (start_bzname,end_bzname,mean_duration), by = c("start_bzname","end_bzname")) %>%
+               mutate (av_car = floor(av_prob_car*mean_duration),
+                       av_PT = floor(av_prob_PT*mean_duration),
+                       av_bike = floor(av_prob_bike*mean_duration),
+                       av_walk = floor(av_prob_walk*mean_duration)) %>%
+               ungroup()
+
+df <- modal_split[,8:18]
+df$av_prob_car <- NULL
+df$av_prob_PT <- NULL
+df$av_prob_bike <- NULL
+df$av_prob_walk <- NULL
+df$mean_duration <- NULL
+df <- df %>%
+      distinct()
+print(xtable(df))
+
+
+
